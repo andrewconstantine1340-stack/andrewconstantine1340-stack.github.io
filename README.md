@@ -1,3 +1,7 @@
+# This Website is made for turning mathematical functions into sound.
+
+
+
 # Andrew Constantine Website
 
 This repository contains the source code and content for Andrew Constantine's personal website and GitHub Pages site.
