@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10121b">
+  <title>Function → Sound</title>
+  <style>
+    :root{color-scheme:dark;--bg:#10121b;--panel:#191c29;--line:#303449;--text:#f4f3fa;--muted:#a3a6bb;--mint:#78f0c2;--purple:#b7a4ff;--pink:#ff8eb2}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 70% 0%,#252343 0,transparent 42%),var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
+    main{width:min(980px,calc(100% - 32px));margin:0 auto;padding:56px 0 64px}.eyebrow{color:var(--mint);font-size:.75rem;font-weight:800;letter-spacing:.18em;text-transform:uppercase}h1{font-size:clamp(2.4rem,7vw,5rem);line-height:1.02;letter-spacing:-.06em;margin:12px 0 16px}.gradient{background:linear-gradient(100deg,var(--mint),var(--purple) 70%);color:transparent;background-clip:text}.intro{max-width:620px;color:var(--muted);font-size:1.08rem;margin-bottom:32px}.card{background:color-mix(in srgb,var(--panel) 94%,transparent);border:1px solid var(--line);border-radius:20px;padding:24px;margin:18px 0;box-shadow:0 18px 60px #0002}.card h2{font-size:1.05rem;margin:0 0 14px}.label{display:block;color:var(--muted);font-size:.88rem;margin-bottom:8px}input[type=text],input[type=number]{width:100%;border:1px solid var(--line);border-radius:11px;background:#10121b;color:var(--text);padding:13px 14px;font:inherit;outline:none}input:focus{border-color:var(--purple);box-shadow:0 0 0 3px #b7a4ff22}.row{display:grid;grid-template-columns:1fr 1fr;gap:14px}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}button,.upload{border:0;border-radius:11px;background:var(--mint);color:#10121b;padding:11px 17px;font:700 .95rem system-ui;cursor:pointer;transition:transform .15s,filter .15s}button:hover,.upload:hover{transform:translateY(-1px);filter:brightness(1.06)}button.secondary,.upload{background:#292c3d;color:var(--text);border:1px solid var(--line)}button.stop{background:#ff8eb2;color:#24111a}.upload input{display:none}.hint,.status,.note{font-size:.86rem;color:var(--muted)}.status{min-height:1.4em;margin-top:10px}.error{color:#ff9ab3}.good{color:var(--mint)}canvas{display:block;width:100%;height:230px;border:1px solid var(--line);border-radius:12px;background:#10121b}.small-title{display:flex;justify-content:space-between;align-items:baseline;gap:12px}.small-title span{color:var(--muted);font-size:.84rem}.playrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}.playrow .note{flex:1;min-width:220px}.hidden{display:none!important}.footer{color:#74788f;font-size:.8rem;margin-top:24px}@media(max-width:600px){main{padding-top:36px}.card{padding:18px}.row{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">A little math, a little music</div>
+  <h1>Make a function<br><span class="gradient">sound like something.</span></h1>
+  <p class="intro">Type a formula or upload a clear picture of one. We’ll plot it, then turn its values into changing notes—right in your browser.</p>
+
+  <section class="card" aria-labelledby="input-heading">
+    <h2 id="input-heading">1. Enter a function</h2>
+    <label class="label" for="formula">Function of x</label>
+    <input id="formula" type="text" spellcheck="false" value="sin(x)" placeholder="Try: sin(x) * 2">
+    <div class="actions">
+      <button id="plotBtn">Plot function</button>
+      <label class="upload">Read from image<input id="imageInput" type="file" accept="image/*"></label>
+    </div>
+    <div id="status" class="status" role="status" aria-live="polite">Try sin(x), x^2, or 2*sin(3*x).</div>
+    <p class="hint">Supported: + − × ÷, powers (^), parentheses, x, pi, e, and sin, cos, tan, sqrt, abs, log, exp. OCR is a first draft—check the recognized formula before plotting.</p>
+  </section>
+
+  <section class="card" aria-labelledby="plot-heading">
+    <div class="small-title"><h2 id="plot-heading">2. Your curve</h2><span id="plotLabel">y = sin(x)</span></div>
+    <canvas id="plot" aria-label="Graph of the entered function"></canvas>
+  </section>
+
+  <section class="card" aria-labelledby="sound-heading">
+    <h2 id="sound-heading">3. Hear it</h2>
+    <div class="row">
+      <div><label class="label" for="xmin">Start x</label><input id="xmin" type="number" value="-6.28" step="0.1"></div>
+      <div><label class="label" for="xmax">End x</label><input id="xmax" type="number" value="6.28" step="0.1"></div>
+    </div>
+    <div class="actions playrow">
+      <button id="playBtn">▶ Play sound</button><button id="stopBtn" class="secondary stop">■ Stop</button>
+      <span class="note">As x moves across the range, function height controls pitch. Values are safely mapped into audible notes.</span>
+    </div>
+  </section>
+  <p class="footer">Audio and graph processing happen locally in your browser. Image text recognition uses the Tesseract.js library loaded from its public CDN.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script>
+(() => {
+  const formula = document.querySelector('#formula');
+  const status = document.querySelector('#status');
+  const canvas = document.querySelector('#plot');
+  const ctx = canvas.getContext('2d');
+  let parsed = null, audio = null, oscillator = null, gain = null, animation = 0;
+
+  // Small allow-listed expression parser; never evaluates user text as JavaScript.
+  function compile(source) {
+    const s = source.replace(/π/g, 'pi').replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-');
+    const tokens = s.match(/\s*(?:(\d+(?:\.\d*)?(?:e[+-]?\d+)?)|(sin|cos|tan|sqrt|abs|log|exp|pi|e|x)|([()+\-*/^])|(\.\d+))/igy);
+    if (!tokens) throw Error('Enter a math expression, such as sin(x) or x^2.');
+    const cleaned = tokens.map(t => t.trim()).filter(Boolean);
+    const compact = s.replace(/\s+/g,'');
+    if (cleaned.join('').toLowerCase() !== compact.toLowerCase()) throw Error('That expression has a character or function I don’t recognize.');
+    let i=0;
+    function peek(){return cleaned[i]}
+    function take(){return cleaned[i++]}
+    function expression(){let node=term();while(peek()==='+'||peek()==='-'){const op=take(),a=node,b=term();node=x=>op==='+'?a(x)+b(x):a(x)-b(x)}return node}
+    function term(){let node=power();while(peek()==='*'||peek()==='/'){const op=take(),a=node,b=power();node=x=>op==='*'?a(x)*b(x):a(x)/b(x)}return node}
+    function power(){let node=unary();if(peek()==='^'){take();const a=node,b=power();node=x=>Math.pow(a(x),b(x))}return node}
+    function unary(){if(peek()==='+'){take();return unary()}if(peek()==='-'){take();const a=unary();return x=>-a(x)}return atom()}
+    function atom(){const t=take();if(t===undefined)throw Error('The expression looks incomplete.');if(t==='('){const n=expression();if(take()!==')')throw Error('Add a closing parenthesis.');return n}if(/^\d|^\.\d/.test(t)){const n=Number(t);return()=>n}if(t.toLowerCase()==='x')return x=>x;if(t.toLowerCase()==='pi')return()=>Math.PI;if(t.toLowerCase()==='e')return()=>Math.E;if(/^(sin|cos|tan|sqrt|abs|log|exp)$/i.test(t)){if(take()!=='(')throw Error('Put parentheses after '+t+'.');const a=expression();if(take()!==')')throw Error('Add a closing parenthesis.');const fn={sin:Math.sin,cos:Math.cos,tan:Math.tan,sqrt:Math.sqrt,abs:Math.abs,log:Math.log,exp:Math.exp}[t.toLowerCase()];return x=>fn(a(x))}throw Error('I couldn’t read that part of the expression.')}
+    const fn=expression();if(i!==cleaned.length)throw Error('Check the expression near “'+peek()+'”.');return x=>{const y=fn(x);return Number.isFinite(y)?y:NaN}
+  }
+  function dimensions(){const dpr=window.devicePixelRatio||1,r=canvas.getBoundingClientRect();canvas.width=Math.max(1,Math.round(r.width*dpr));canvas.height=Math.max(1,Math.round(r.height*dpr));ctx.setTransform(dpr,0,0,dpr,0,0);return {w:r.width,h:r.height}}
+  function draw(){if(!parsed)return;const {w,h}=dimensions(),lo=Number(document.querySelector('#xmin').value),hi=Number(document.querySelector('#xmax').value);ctx.clearRect(0,0,w,h);if(!Number.isFinite(lo)||!Number.isFinite(hi)||hi<=lo){status.textContent='End x must be larger than start x.';status.className='status error';return}
+    const N=Math.max(250,Math.floor(w*1.5)),pts=[];let min=Infinity,max=-Infinity;for(let i=0;i<N;i++){const x=lo+(hi-lo)*i/(N-1),y=parsed(x);pts.push([x,y]);if(Number.isFinite(y)&&Math.abs(y)<1e6){min=Math.min(min,y);max=Math.max(max,y)}}if(!Number.isFinite(min)){status.textContent='No finite values in this range. Try another function or x-range.';status.className='status error';return}if(max-min<1e-8){min-=1;max+=1}const pad=(max-min)*.12;min-=pad;max+=pad;const X=x=>(x-lo)/(hi-lo)*w,Y=y=>h-(y-min)/(max-min)*h;
+    ctx.strokeStyle='#303449';ctx.lineWidth=1;ctx.beginPath();if(min<0&&max>0){ctx.moveTo(0,Y(0));ctx.lineTo(w,Y(0))}if(lo<0&&hi>0){ctx.moveTo(X(0),0);ctx.lineTo(X(0),h)}ctx.stroke();ctx.strokeStyle='#78f0c2';ctx.lineWidth=2.5;ctx.beginPath();let drawing=false;for(const [x,y] of pts){if(!Number.isFinite(y)||Math.abs(y)>1e6){drawing=false;continue}if(!drawing){ctx.moveTo(X(x),Y(y));drawing=true}else ctx.lineTo(X(x),Y(y))}ctx.stroke();
+  }
+  function update(){try{parsed=compile(formula.value);document.querySelector('#plotLabel').textContent='y = '+formula.value;status.textContent='Function ready. Adjust the x-range if you like.';status.className='status good';draw()}catch(e){parsed=null;document.querySelector('#plotLabel').textContent='Function not plotted';status.textContent=e.message;status.className='status error';ctx.clearRect(0,0,canvas.width,canvas.height)}}
+  document.querySelector('#plotBtn').addEventListener('click',update);formula.addEventListener('keydown',e=>{if(e.key==='Enter')update()});document.querySelector('#xmin').addEventListener('change',draw);document.querySelector('#xmax').addEventListener('change',draw);window.addEventListener('resize',draw);
+  document.querySelector('#imageInput').addEventListener('change',async e=>{const file=e.target.files[0];if(!file)return;if(!window.Tesseract){status.textContent='Image reader did not load. Check your internet connection, then try again.';status.className='status error';return}status.textContent='Reading image…';status.className='status';try{const result=await Tesseract.recognize(file,'eng',{logger:m=>{if(m.status==='recognizing text')status.textContent='Reading image… '+Math.round((m.progress||0)*100)+'%'}});const text=result.data.text.replace(/\s+/g,' ').trim();if(!text)throw Error('No text found. Try a sharper, well-lit image.');formula.value=text;status.textContent='Text recognized—please check it, then plot.';status.className='status good'}catch(err){status.textContent='Could not read that image. Try a clearer crop of the formula.';status.className='status error'}e.target.value=''});
+  function stop(){cancelAnimationFrame(animation);animation=0;if(gain&&audio){gain.gain.cancelScheduledValues(audio.currentTime);gain.gain.setTargetAtTime(0,audio.currentTime,.025)}if(oscillator){try{oscillator.stop(audio.currentTime+.12)}catch{}oscillator=null}document.querySelector('#playBtn').textContent='▶ Play sound'}
+  document.querySelector('#stopBtn').addEventListener('click',stop);
+  document.querySelector('#playBtn').addEventListener('click',async()=>{if(!parsed)update();if(!parsed)return;stop();const lo=Number(document.querySelector('#xmin').value),hi=Number(document.querySelector('#xmax').value);if(!Number.isFinite(lo)||!Number.isFinite(hi)||hi<=lo){status.textContent='End x must be larger than start x.';status.className='status error';return}audio=audio||new(window.AudioContext||window.webkitAudioContext)();await audio.resume();oscillator=audio.createOscillator();gain=audio.createGain();oscillator.type='sine';gain.gain.value=0;oscillator.connect(gain);gain.connect(audio.destination);oscillator.start();const started=audio.currentTime,duration=8,steps=400;document.querySelector('#playBtn').textContent='♪ Playing…';status.textContent='Playing an 8-second sweep through your function.';status.className='status good';for(let i=0;i<=steps;i++){const t=i/steps,x=lo+(hi-lo)*t,y=parsed(x),safe=Number.isFinite(y)?Math.tanh(y/3):0,freq=220*Math.pow(2,(safe*24)/12);const at=started+t*duration;oscillator.frequency.setTargetAtTime(Math.max(80,Math.min(1200,freq)),at,.012);gain.gain.setTargetAtTime(.14*Math.min(1,t*18,(1-t)*18),at,.01)}animation=requestAnimationFrame(function tick(){if(audio.currentTime>=started+duration){stop();status.textContent='Finished. Change the formula or range and play again.';status.className='status';return}animation=requestAnimationFrame(tick)})});
+  update();
+})();
+</script>
+</body>
+</html>
